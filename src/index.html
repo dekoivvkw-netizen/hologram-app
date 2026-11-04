@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ologramma">
+<meta name="theme-color" content="#000814">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<style>body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);box-sizing:border-box;background:#000814}</style>
+<title>Ologramma 3D</title>
+<style>
+html,body{margin:0;height:100%;background:#02030a;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,sans-serif;color:#cfffff}
+canvas{display:block;touch-action:none}
+#panel{position:fixed;top:16px;right:16px;width:260px;padding:16px 18px;border-radius:16px;
+background:rgba(20,40,60,.25);border:1px solid rgba(0,255,255,.35);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+box-shadow:0 0 24px rgba(0,255,255,.18),inset 0 0 18px rgba(255,0,255,.08);z-index:10}
+#panel h1{margin:0 0 12px;font-size:15px;letter-spacing:3px;text-transform:uppercase;color:#7ff;text-shadow:0 0 8px #0ff}
+label{display:block;font-size:12px;margin:10px 0 4px;letter-spacing:1px;color:#aef}
+select,button{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,255,255,.4);background:rgba(0,30,40,.5);color:#dff;font-size:13px}
+button{cursor:pointer;margin-top:12px;font-weight:600;letter-spacing:1px}
+button:hover{background:rgba(0,255,255,.2);box-shadow:0 0 12px #0ff}
+input[type=range]{width:100%;accent-color:#0ff}
+.row{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px}
+.row input{accent-color:#f0f;width:18px;height:18px}
+#toggle{display:none;position:fixed;top:12px;right:12px;z-index:11;width:auto;margin:0}
+#hint{position:fixed;left:16px;bottom:14px;font-size:11px;opacity:.6;letter-spacing:1px}
+@media (max-width:640px){
+ #panel{top:auto;bottom:0;right:0;left:0;width:auto;border-radius:16px 16px 0 0;max-height:55vh;overflow:auto}
+ #panel.hidden{display:none}
+ #toggle{display:block}
+ #hint{display:none}
+}
+</style>
+<script type="importmap">
+{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/addons/"}}
+</script>
+</head>
+<body>
+<button id="toggle">☰ Controlli</button>
+<div id="panel">
+ <h1>◈ Ologramma</h1>
+ <label for="shape">Forma</label>
+ <select id="shape">
+  <option value="sfera">Sfera</option><option value="toro">Toro</option>
+  <option value="cubo">Cubo</option><option value="nodo" selected>Nodo</option>
+  <option value="testo">Testo 3D 'OLOGRAMMA'</option>
+ </select>
+ <label for="hue">Tonalità colore</label><input id="hue" type="range" min="0" max="360" value="180">
+ <label for="speed">Velocità di rotazione</label><input id="speed" type="range" min="0" max="3" step="0.05" value="0.6">
+ <label for="glitch">Intensità glitch</label><input id="glitch" type="range" min="0" max="1" step="0.01" value="0.3">
+ <div class="row"><input id="scan" type="checkbox" checked><label for="scan" style="margin:0">Linee di scansione</label></div>
+ <button id="fs">Schermo intero</button>
+</div>
+<div id="hint">Trascina per ruotare · Rotella/pizzico per lo zoom</div>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+import {FontLoader} from 'three/addons/loaders/FontLoader.js';
+import {TextGeometry} from 'three/addons/geometries/TextGeometry.js';
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.setClearColor(0x02030a);
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x02030a,0.04);
+const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.1,200);
+camera.position.set(0,1.5,innerWidth<640?10:7);
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;controls.target.set(0,0.6,0);controls.minDistance=3;controls.maxDistance=20;
+
+const U={uTime:{value:0},uHue:{value:0.5},uGlitch:{value:0.3},uScan:{value:1},uOpacity:{value:1}};
+const vert=`uniform float uTime;uniform float uGlitch;varying vec3 vN;varying vec3 vV;varying vec3 vW;
+float h(float n){return fract(sin(n)*43758.5453);}
+void main(){vec3 p=position;float t=floor(uTime*12.);
+float band=step(0.93,h(t+floor(p.y*6.)))*uGlitch;p.x+=band*(h(t*1.7)-.5)*.6;
+vec4 w=modelMatrix*vec4(p,1.);vW=w.xyz;vN=normalize(normalMatrix*normal);vV=-(viewMatrix*w).xyz;
+gl_Position=projectionMatrix*viewMatrix*w;}`;
+const frag=`uniform float uTime;uniform float uHue;uniform float uGlitch;uniform float uScan;uniform float uOpacity;
+varying vec3 vN;varying vec3 vV;varying vec3 vW;
+vec3 hsv(float h,float s,float v){vec3 k=clamp(abs(mod(h*6.+vec3(0,4,2),6.)-3.)-1.,0.,1.);return v*mix(vec3(1),k,s);}
+float r(float n){return fract(sin(n)*43758.5453);}
+void main(){float f=pow(1.-abs(dot(normalize(vN),normalize(vV))),2.2);
+vec3 c1=hsv(uHue,.9,1.),c2=hsv(fract(uHue+.33),.9,1.);
+vec3 col=mix(c1*.25,c2,f)*.8+c1*f*.5;
+float s=1.;if(uScan>.5){s=.65+.35*sin(vW.y*120.-uTime*8.);s*=.85+.15*sin(vW.y*12.+uTime*3.);}
+float fl=.9+.1*sin(uTime*40.)*r(floor(uTime*20.));
+float g=step(1.-uGlitch*.15,r(floor(uTime*15.)+floor(vW.y*20.)));
+col+=g*c2*1.5;
+float a=(.08+f*.6)*s*fl*uOpacity;
+gl_FragColor=vec4(col*s*fl,a);}`;
+const holoMat=new THREE.ShaderMaterial({uniforms:U,vertexShader:vert,fragmentShader:frag,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.FrontSide});
+const wireMat=new THREE.MeshBasicMaterial({color:0x00ffff,wireframe:true,transparent:true,opacity:.15,blending:THREE.AdditiveBlending,depthWrite:false});
+
+const holo=new THREE.Group();holo.position.y=1.2;scene.add(holo);
+let font=null;
+new FontLoader().load('./vendor/three/fonts/helvetiker_bold.typeface.json',f=>{font=f;if(cur==='testo')setShape('testo');});
+let cur='nodo';
+function geom(n){switch(n){
+ case 'sfera':return new THREE.IcosahedronGeometry(1.3,4);
+ case 'toro':return new THREE.TorusGeometry(1.1,.4,32,96);
+ case 'cubo':return new THREE.BoxGeometry(1.8,1.8,1.8,6,6,6);
+ case 'testo':if(font){const g=new TextGeometry('OLOGRAMMA',{font,size:.42,height:.15,curveSegments:6,bevelEnabled:true,bevelThickness:.02,bevelSize:.015,bevelSegments:2});g.center();g.computeVertexNormals();return g;}
+  return new THREE.IcosahedronGeometry(1.3,1);
+ default:return new THREE.TorusKnotGeometry(.9,.3,200,24);}}
+function setShape(n){cur=n;holo.children.forEach(c=>c.geometry.dispose());holo.clear();
+ const g=geom(n);holo.add(new THREE.Mesh(g,holoMat));
+ const w=new THREE.Mesh(n==='testo'?g:geom(n),wireMat);w.scale.setScalar(1.01);holo.add(w);}
+setShape('nodo');
+
+// Base del proiettore
+const baseMat=new THREE.MeshStandardMaterial({color:0x0a1420,metalness:.9,roughness:.3});
+const base=new THREE.Mesh(new THREE.CylinderGeometry(1.4,1.7,.3,64),baseMat);base.position.y=-1.15;scene.add(base);
+const ringMat=new THREE.MeshBasicMaterial({color:0x00ffff});
+const ring=new THREE.Mesh(new THREE.TorusGeometry(1.25,.03,8,96),ringMat);ring.rotation.x=Math.PI/2;ring.position.y=-.99;scene.add(ring);
+const ring2=new THREE.Mesh(new THREE.TorusGeometry(.7,.02,8,64),ringMat);ring2.rotation.x=Math.PI/2;ring2.position.y=-.99;scene.add(ring2);
+const lens=new THREE.Mesh(new THREE.CircleGeometry(.5,48),new THREE.MeshBasicMaterial({color:0x66ffff}));lens.rotation.x=-Math.PI/2;lens.position.y=-.995;scene.add(lens);
+scene.add(new THREE.AmbientLight(0x335566,1));
+const pl=new THREE.PointLight(0x00ffff,20,10);pl.position.set(0,0,0);scene.add(pl);
+// Cono di luce
+const coneMat=new THREE.ShaderMaterial({uniforms:U,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
+ vertexShader:`varying vec2 vUv;varying vec3 vN;varying vec3 vV;void main(){vUv=uv;vN=normalize(normalMatrix*normal);vec4 m=modelViewMatrix*vec4(position,1.);vV=-m.xyz;gl_Position=projectionMatrix*m;}`,
+ fragmentShader:`uniform float uTime;uniform float uHue;varying vec2 vUv;varying vec3 vN;varying vec3 vV;
+ vec3 hsv(float h,float s,float v){vec3 k=clamp(abs(mod(h*6.+vec3(0,4,2),6.)-3.)-1.,0.,1.);return v*mix(vec3(1),k,s);}
+ void main(){float e=abs(dot(normalize(vN),normalize(vV)));float a=pow(1.-vUv.y,1.5)*.12*e*(.85+.15*sin(uTime*6.+vUv.y*30.));gl_FragColor=vec4(hsv(uHue,.8,1.),a);}`});
+const cone=new THREE.Mesh(new THREE.CylinderGeometry(2.2,.5,3.6,64,1,true),coneMat);cone.position.y=.8;scene.add(cone);
+// Griglia
+const grid=new THREE.GridHelper(40,60,0x004455,0x002233);grid.position.y=-1.3;scene.add(grid);
+// Particelle
+const N=innerWidth<640?600:1500,pos=new Float32Array(N*3),spd=new Float32Array(N);
+for(let i=0;i<N;i++){const r=Math.random()*5,a=Math.random()*6.283;pos[i*3]=Math.cos(a)*r;pos[i*3+1]=Math.random()*6-1.2;pos[i*3+2]=Math.sin(a)*r;spd[i]=.2+Math.random()*.6;}
+const pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(pos,3));
+const pMat=new THREE.PointsMaterial({color:0x66ffff,size:.025,transparent:true,opacity:.6,blending:THREE.AdditiveBlending,depthWrite:false});
+const pts=new THREE.Points(pg,pMat);scene.add(pts);
+
+// Bloom
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),0.45,.25,.3);composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// UI
+const $=id=>document.getElementById(id);
+let speed=.6;
+$('shape').onchange=e=>setShape(e.target.value);
+$('hue').oninput=e=>{const h=e.target.value/360;U.uHue.value=h;const c=new THREE.Color().setHSL(h,1,.5);wireMat.color.copy(c);ringMat.color.copy(c);pMat.color.setHSL(h,1,.7);pl.color.copy(c);lens.material.color.setHSL(h,1,.7);};
+$('speed').oninput=e=>speed=+e.target.value;
+$('glitch').oninput=e=>U.uGlitch.value=+e.target.value;
+$('scan').onchange=e=>U.uScan.value=e.target.checked?1:0;
+$('fs').onclick=()=>{const d=document;if(!d.fullscreenElement&&!d.webkitFullscreenElement){(d.documentElement.requestFullscreen||d.documentElement.webkitRequestFullscreen)?.call(d.documentElement);}else{(d.exitFullscreen||d.webkitExitFullscreen)?.call(d);}};
+document.addEventListener('fullscreenchange',()=>$('fs').textContent=document.fullscreenElement?'Esci da schermo intero':'Schermo intero');
+$('toggle').onclick=()=>$('panel').classList.toggle('hidden');
+if(innerWidth<640)$('panel').classList.add('hidden');
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);});
+
+const clock=new THREE.Clock();
+(function loop(){requestAnimationFrame(loop);const dt=Math.min(clock.getDelta(),.05),t=clock.elapsedTime;
+ U.uTime.value=t;holo.rotation.y+=dt*speed;holo.rotation.x=Math.sin(t*.4)*.15;holo.position.y=1.2+Math.sin(t*1.2)*.08;
+ const gj=U.uGlitch.value;holo.position.x=(Math.random()<gj*.05)?(Math.random()-.5)*.2*gj:0;
+ ring.rotation.z+=dt*.5;ring2.rotation.z-=dt*.8;
+ const p=pg.attributes.position.array;for(let i=0;i<N;i++){p[i*3+1]+=spd[i]*dt*.5;if(p[i*3+1]>5)p[i*3+1]=-1.2;}pg.attributes.position.needsUpdate=true;
+ pts.rotation.y+=dt*.05;controls.update();composer.render();})();
+window.__holoReady=true;
+</script>
+<script>if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("./sw.js"));</script>
+</body>
+</html>
